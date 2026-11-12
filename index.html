@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0a101b">
-  <meta name="description" content="A structured personal penetration-testing knowledge base, lab archive, and field manual built from verified practice.">
+  <meta name="description" content="My penetration-testing notebook: lab reports, services, tools and attack-point notes.">
   <title>Hacking Notebook · Field Manual</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,22 +46,26 @@
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
       <a class="brand" href="#/overview" aria-label="Hacking Notebook home">
         <span class="brand-mark"><span class="brand-mark-inner">/</span></span>
-        <span class="brand-copy"><strong>HACKING<span class="brand-accent">.</span>NOTEBOOK</strong><small>PERSONAL FIELD MANUAL</small></span>
+        <span class="brand-copy"><strong>HACKING<span class="brand-accent">.</span>NOTEBOOK</strong><small>MY FIELD NOTES</small></span>
       </a>
       <div class="sidebar-body">
         <div class="nav-group"><p class="nav-heading">WORKSPACE</p>
           <a href="#/overview" class="nav-item" data-nav="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></a>
           <a href="#/labs" class="nav-item" data-nav="labs"><svg><use href="#i-flask"/></svg><span>Lab reports</span><span class="nav-count" id="nav-labs">0</span></a>
-          <a href="#/guides" class="nav-item" data-nav="guides"><svg><use href="#i-book"/></svg><span>Learning guide</span><span class="nav-count" id="nav-guides">0</span></a>
+          <a href="#/guides" class="nav-item" data-nav="guides"><svg><use href="#i-book"/></svg><span>Reference library</span><span class="nav-count" id="nav-guides">0</span></a>
         </div>
-        <div class="nav-group"><p class="nav-heading">INDEXES</p>
-          <a href="#/paths" class="nav-item" data-nav="paths"><svg><use href="#i-route"/></svg><span>Attack paths</span></a>
-          <a href="#/tools" class="nav-item" data-nav="tools"><svg><use href="#i-terminal"/></svg><span>Tools & commands</span></a>
+        <div class="nav-group"><p class="nav-heading">REFERENCE SECTIONS</p>
+          <a href="#/services" class="nav-item" data-nav="services"><svg><use href="#i-layers"/></svg><span>Services</span></a>
+          <a href="#/tools" class="nav-item" data-nav="tools"><svg><use href="#i-terminal"/></svg><span>Tools</span></a>
+          <a href="#/attack-points" class="nav-item" data-nav="attack-points"><svg><use href="#i-shield"/></svg><span>Attack points</span></a>
         </div>
-        <div class="nav-group nav-topics" id="topics-nav"><p class="nav-heading">LEARNED TOPICS</p><div class="nav-hint">Categories appear as content is added.</div></div>
+        <div class="nav-group"><p class="nav-heading">LAB INDEX</p>
+          <a href="#/paths" class="nav-item" data-nav="paths"><svg><use href="#i-route"/></svg><span>Lab chains</span></a>
+        </div>
+        <div class="nav-group nav-topics" id="topics-nav"><p class="nav-heading">BROWSE TOPICS</p><div class="nav-hint">I add sections as I learn.</div></div>
       </div>
       <div class="sidebar-footer">
-        <div class="vault-status"><span class="status-light"></span><span>CONTENT-DRIVEN ARCHIVE</span></div>
+        <div class="vault-status"><span class="status-light"></span><span>MY TECHNICAL NOTEBOOK</span></div>
         <a class="repo-link" href="https://github.com/abslzero-in/hacking_notebook" target="_blank" rel="noopener noreferrer"><svg><use href="#i-github"/></svg><span>View repository</span><svg class="tiny-arrow"><use href="#i-up"/></svg></a>
       </div>
     </aside>
@@ -71,12 +75,12 @@
         <div class="top-actions"><button class="search-trigger" id="open-search"><svg><use href="#i-search"/></svg><span>Search everything...</span><kbd>⌘ K</kbd></button><button class="icon-button" id="theme-toggle" aria-label="Toggle color theme"><svg><use href="#i-sun"/></svg></button></div>
       </header>
       <main class="page-content" id="main" tabindex="-1" aria-live="polite"></main>
-      <footer class="site-footer"><span>HACKING NOTEBOOK <span class="foot-separator">/</span> BUILT FROM VERIFIED PRACTICE</span><span id="footer-status">NO CONTENT ADDED</span></footer>
+      <footer class="site-footer"><span>HACKING NOTEBOOK <span class="foot-separator">/</span> MY LABS & FIELD NOTES</span><span id="footer-status">NO CONTENT ADDED</span></footer>
     </div>
   </div>
   <div class="search-modal" id="search-modal" role="dialog" aria-modal="true" aria-label="Search notebook" hidden>
     <button class="modal-backdrop" id="close-search-backdrop" aria-label="Close search"></button>
-    <div class="search-panel"><div class="modal-search-row"><svg><use href="#i-search"/></svg><input id="modal-query" type="search" placeholder="Search labs, techniques, tools, notes..." autocomplete="off" spellcheck="false"><kbd>ESC</kbd></div><div id="modal-results" class="modal-results"></div><div class="modal-tip"><span>SEARCH ACROSS ALL ENTRIES</span><span><kbd>↵</kbd> open · <kbd>esc</kbd> close</span></div></div>
+    <div class="search-panel"><div class="modal-search-row"><svg><use href="#i-search"/></svg><input id="modal-query" type="search" placeholder="Search labs, services, tools, attack points..." autocomplete="off" spellcheck="false"><kbd>ESC</kbd></div><div id="modal-results" class="modal-results"></div><div class="modal-tip"><span>SEARCH ACROSS ALL ENTRIES</span><span><kbd>↵</kbd> open · <kbd>esc</kbd> close</span></div></div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
