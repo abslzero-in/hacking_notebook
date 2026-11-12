@@ -13,7 +13,7 @@ I am preparing for practical penetration testing, including CPENT. I want this n
 - **Attack points:** Actual weaknesses I investigated, such as executable file uploads, ProFTPD `mod_copy`, unexpected SUID permissions and PATH hijacking. These are distinct from tools used for enumeration.
 - **Lab chains:** The sequence in which I combined findings during a specific lab.
 
-At present the notebook covers my guided work on **Vulnversity** and **Kenobi**. I am not marking those labs as independently mastered. Where I have not retained final output, I note the evidence gap instead of claiming I verified something.
+At present the notebook covers **Vulnversity**, **Kenobi** and **Overpass**. In Overpass, I independently investigated the login JavaScript and authenticated over SSH with an exposed key after recovering its encryption passphrase; the root cron exploitation path was explored with guidance and a final root-shell result has not yet been recorded. I do not mark any lab as independently mastered without evidence, and I note missing outputs instead of claiming verification.
 
 ## My rule for updates
 
